@@ -1,0 +1,84 @@
+name: Publish Python Bindings
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'commit/tag/branch reference'
+        required: true
+        type: string
+      package-version:
+        description: 'version for the python package (MAJOR.MINOR.BUILD)'
+        required: true
+        type: string
+      publish:
+        description: 'value indicating whether to publish to pypi.'
+        required: true
+        type: boolean
+        default: false
+    secrets:
+      PYPI_API_TOKEN:
+        description: 'api token to authenticate to pypi'
+        required: true
+
+jobs:
+  build-darwin-wheel:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout breez-sdk repo
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: sdk-bindings-darwin-universal
+          path: libs/sdk-bindings/bindings-python/src/breez-sdk
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: bindings-python
+          path: libs/sdk-bindings/bindings-python/src/breez-sdk
+
+      - name: Display structure of downloaded files
+        run: ls -R libs/sdk-bindings/bindings-python/src/breez-sdk
+
+      - name: Update package version
+        if: ${{ inputs.package-version }}
+        working-directory: libs/sdk-bindings/bindings-python
+        run: sed -i.bak -e 's/    version=".*",/    version="${{ inputs.package-version }}",/' setup.py
+
+      - name: Build wheel
+        working-directory: libs/sdk-bindings/bindings-python
+        run: python setup.py sdist bdist_wheel
+
+      - name: Archive the wheel
+        uses: actions/upload-artifact@v3
+        with:
+          name: python-darwin-wheel
+          path: libs/sdk-bindings/bindings-python/dist/*.whl
+
+  publish-package:
+    runs-on: macos-latest
+    needs: [build-darwin-wheel]
+    steps:
+      - name: Checkout breez-sdk repo
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - name: Create dist directory
+        working-directory: libs/sdk-bindings/bindings-python
+        run: mkdir -p dist
+
+      - uses: actions/download-artifact@v3
+        with:
+          name: python-darwin-wheel
+          path: libs/sdk-bindings/bindings-python/dist
+
+      - name: "Publish on test PyPI"
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          repository_url: https://test.pypi.org/
+          packages_dir: dist/*
